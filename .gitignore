@@ -1,0 +1,12 @@
+!*.py 
+!*.ipynb
+*__pycache__*
+demo/*
+*/data/*
+*/.glove/*
+*/experiments/*
+.DS_Store
+*.save/*
+*.pyc
+*/.save/*
+*.json.gz 
