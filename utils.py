@@ -17,3 +17,9 @@ def last_commit_msg():
     msg_short = '_'.join(check_output('git log -1 --pretty=format:"%B"'.split()).decode('utf-8').strip('\n').replace('\n', '').replace('\"', '').split(' '))
     return f"{msg_short}_{hashed_id}"
 
+def save_dependencies(ckpt):
+    try:
+        import subprocess
+        subprocess.Popen(f"pip freeze > {ckpt}/requirements.txt")
+    except:
+        pass

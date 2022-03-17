@@ -13,7 +13,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast
 
-from utils import random_seed, last_commit_msg
+from utils import random_seed, last_commit_msg, save_dependencies
 from models.model import Model
 
 from collections import OrderedDict, defaultdict
@@ -102,6 +102,8 @@ def train(e, model, optimizer, train_iter, args):
 def main(data_path, args, pretrained_weights=None):
 
     ckpt_dir = os.path.join(args.ckpt_dir, f"{last_commit_msg()}_seed_{args.seed}", dt.now().strftime("%Y-%m-%d-%H-%M-%S"))
+    save_dependencies(ckpt_dir)
+    
     terminate_cnt = 0
 
     if not os.path.exists(ckpt_dir):
