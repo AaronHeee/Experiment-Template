@@ -162,6 +162,8 @@ def main(data_path, args, pretrained_weights=None):
                 with open(os.path.join(ckpt_dir, "test.log"), "w") as f:
                     test_metrics.update({'epoch': e})
                     f.write(json.dumps(test_metrics, indent=2))
+                with open(os.path.join(ckpt_dir, "args.log"), "w") as f:
+                    f.write(json.dumps(args, indent=2)) 
                 terminate_cnt = 0
             else:
                 terminate_cnt += 1
