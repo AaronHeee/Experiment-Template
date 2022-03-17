@@ -102,12 +102,14 @@ def train(e, model, optimizer, train_iter, args):
 def main(data_path, args, pretrained_weights=None):
 
     ckpt_dir = os.path.join(args.ckpt_dir, f"{last_commit_msg()}_seed_{args.seed}", dt.now().strftime("%Y-%m-%d-%H-%M-%S"))
-    save_dependencies(ckpt_dir)
     
     terminate_cnt = 0
 
     if not os.path.exists(ckpt_dir):
         os.makedirs(ckpt_dir)
+    save_dependencies(ckpt_dir)
+    with open(os.path.join(ckpt_dir, "args.log"), "w") as f:
+        f.write(json.dumps(vars(args), indent=2)) 
 
     assert torch.cuda.is_available()
 
@@ -164,8 +166,6 @@ def main(data_path, args, pretrained_weights=None):
                 with open(os.path.join(ckpt_dir, "test.log"), "w") as f:
                     test_metrics.update({'epoch': e})
                     f.write(json.dumps(test_metrics, indent=2))
-                with open(os.path.join(ckpt_dir, "args.log"), "w") as f:
-                    f.write(json.dumps(args, indent=2)) 
                 terminate_cnt = 0
             else:
                 terminate_cnt += 1

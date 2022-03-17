@@ -9,6 +9,8 @@ def random_seed(seed=None):
     torch.manual_seed(seed)
     random.seed(seed)
     np.random.seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
     return seed
     
 def last_commit_msg():
@@ -19,7 +21,7 @@ def last_commit_msg():
 
 def save_dependencies(ckpt):
     try:
-        import subprocess
-        subprocess.Popen(f"pip freeze > {ckpt}/requirements.txt")
+        import os
+        os.system(f"pip freeze > {ckpt}/requirements.txt")
     except:
         pass
