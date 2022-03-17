@@ -17,7 +17,8 @@ def last_commit_msg():
     from subprocess import check_output
     hashed_id = check_output('git log -1 --pretty=format:"%H"'.split()).decode('utf-8').rstrip('\n').replace('\n', '').replace('\"', '')[:8]
     msg_short = '_'.join(check_output('git log -1 --pretty=format:"%B"'.split()).decode('utf-8').strip('\n').replace('\n', '').replace('\"', '').split(' '))
-    return f"{msg_short}_{hashed_id}"
+    current_branch = check_output('git rev-parse --abbrev-ref HEAD'.split()).decode('utf-8').rstrip('\n').replace('\n', '').replace('\"', '')
+    return current_branch, f"{msg_short}_{hashed_id}"
 
 def save_dependencies(ckpt):
     try:

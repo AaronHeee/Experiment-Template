@@ -100,17 +100,8 @@ def train(e, model, optimizer, train_iter, args):
 
 
 def main(data_path, args, pretrained_weights=None):
-
-    ckpt_dir = os.path.join(args.ckpt_dir, f"{last_commit_msg()}_seed_{args.seed}", dt.now().strftime("%Y-%m-%d-%H-%M-%S"))
     
     terminate_cnt = 0
-
-    if not os.path.exists(ckpt_dir):
-        os.makedirs(ckpt_dir)
-    save_dependencies(ckpt_dir)
-    with open(os.path.join(ckpt_dir, "args.log"), "w") as f:
-        f.write(json.dumps(vars(args), indent=2)) 
-
     assert torch.cuda.is_available()
 
     print("[!] loading dataset...")
@@ -213,6 +204,19 @@ def parse_arguments():
 if __name__ == "__main__":
     args = parse_arguments()
     args.seed = random_seed(args.seed)
-    print(args)
-    args.K = eval(args.K)
+
+    # logging folder
+    branch, commit = last_commit_msg()
+    ckpt_dir = os.path.join('checkpoints', branch, args.ckpt_dir, f"{commit}_seed_{args.seed}", dt.now().strftime("%Y-%m-%d-%H-%M-%S"))
+
+    if not os.path.exists(ckpt_dir):
+        os.makedirs(ckpt_dir)
+
+    with open(os.path.join(ckpt_dir, "args.log"), "w") as f:
+        f.write(json.dumps(vars(args), indent=2)) 
+    save_dependencies(ckpt_dir)
+
+    # main
+    print(f"set ckpt as {ckpt_dir}")
     main(f"data/{args.data}", args, args.load_pretrained_weights)
+    print(f"set ckpt as {ckpt_dir}")
