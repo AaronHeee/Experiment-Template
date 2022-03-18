@@ -5,7 +5,6 @@ import numpy as np
 def random_seed(seed=None):
     if seed is None:
         seed = torch.initial_seed() % 2**32
-    torch.use_deterministic_algorithms(True)
     torch.manual_seed(seed)
     random.seed(seed)
     np.random.seed(seed)
