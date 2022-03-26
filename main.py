@@ -207,7 +207,7 @@ if __name__ == "__main__":
 
     # logging folder
     branch, commit = last_commit_msg()
-    ckpt_dir = os.path.join('checkpoints', branch, args.ckpt_dir, f"{commit}_seed_{args.seed}", dt.now().strftime("%Y-%m-%d-%H-%M-%S"))
+    ckpt_dir = os.path.join('checkpoints', branch, commit, args.ckpt_dir, f"seed_{args.seed}_dt.now().strftime('%Y-%m-%d-%H-%M-%S')")
 
     if not os.path.exists(ckpt_dir):
         os.makedirs(ckpt_dir)
