@@ -1,188 +1,103 @@
-import os
+import os 
 import json
 import argparse
-import torch
-import random
-import numpy as np
-
-from tqdm import tqdm
 from datetime import datetime as dt
-from torch import optim
-from torch.nn.utils import clip_grad_norm_
-from torch.nn import functional as F
+
+import torch 
+from torch import nn 
 from torch.utils.data import DataLoader
-from torch.cuda.amp import autocast
 
+from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_score
+
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from utils import random_seed, last_commit_msg, save_dependencies
-from models.model import Model
 
-from collections import OrderedDict, defaultdict
+MIN_VAL = 1e-6
 
-TER = 10 # early stopping
+# ------------------------
+# Model 
+# ------------------------
+
+class Model(pl.LightningModule):
+
+    # --------------------
+    # Model Definition
+    # --------------------
+
+    def __init__(self, args):
+        super().__init__()
+        # args
+        self.args = args
+
+    def forward(self, batch):
+        pass
+
+    # -------------------
+    # Training Definition
+    # -------------------
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.args.lr, weight_decay=self.args.decay)
+        return optimizer 
+
+    def training_step(self, batch, batch_idx):
+        aspect_label, senti_label = batch['aspect_label'].squeeze(-1), batch['senti_label'].squeeze(-1)
+        aspect_pred, senti_pred = self.forward(batch)
+        # loss calculation
+        aspect_loss = self.aspect_criterion(aspect_pred, aspect_label)
+        senti_loss = self.senti_criterion(senti_pred, senti_label)
+        # logging
+        self.log('train/aspect_loss', aspect_loss.item())
+        self.log('train/senti_loss', senti_loss.item())
+        # multiple loss
+        loss = aspect_loss + senti_loss
+        return loss 
+
+    def validation_step(self, batch, batch_idx):
+        pass
+
+
+    def test_step(self, batch, batch_idx):
+        pass
+ 
+# ------------------------
+# Dataset 
+# ------------------------
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, path, mode, args):
         self.args = args
         self.mode = mode
-       
+
     def __len__(self):
-        return len(self.users)
+        pass
 
     def __getitem__(self, index):
-        u = self.users[index]
-        if self.mode == "train":
-            return torch.LongTensor(c), torch.LongTensor(a), torch.LongTensor(c_), torch.LongTensor(a_), torch.LongTensor([u]), torch.LongTensor([i]), torch.LongTensor([j])
-        else:
-            return torch.LongTensor(c), torch.LongTensor(a), torch.LongTensor(c_), torch.LongTensor(a_), torch.LongTensor([u]), torch.LongTensor(t)
-
-
-def evaluate(model, val_iter, args=None):
-    res = defaultdict(list)
-
-    with torch.no_grad():
-        model.eval()
-
-        for b, batch in tqdm(enumerate(val_iter)):
-            c, a, c_, a_, u, t = batch
-            c, a, c_, a_, u, t = c.cuda(), a.cuda(), c_.cuda(), a_.cuda(), u.cuda(), t.cuda()
-
-            with autocast():
-                ori_output = model(c, a, c_, a_, u) # (b, |I|)
-                preds = ori_output.topk(k=max(args.K))[-1]
-
-            for pred, trg in zip(preds, t):
-                trgs = set(trg.tolist()) - {args.pad}
-                for k in args.K:
-                    ori_pred = set(pred[:k].tolist()) - {args.pad}
-                    ori_acc = len(trgs & ori_pred) / len(trgs | ori_pred)
-                    ori_prec = len(trgs & ori_pred) / len(ori_pred) if len(ori_pred) else 0
-                    ori_rec = len(trgs & ori_pred) / len(trgs)
-                    ori_f1 = 2 / ((1/ (ori_rec + 1e-8))+ (1/(ori_prec + 1e-8)))
-
-                    res[f'ori_prec@{k}'].append(ori_prec)
-                    res[f'ori_rec@{k}'].append(ori_rec)
-                    res[f'ori_acc@{k}'].append(ori_acc)
-                    res[f'ori_f1@{k}'].append(ori_f1)
-
-                res['loss'].append(0)
-
-        return OrderedDict({i: np.mean(res[i]) for i in res})
-
-def train(e, model, optimizer, train_iter, args):
-    model.train()
-    total_loss = []
-    tqdm_iter = tqdm(train_iter)
-    for b, batch in enumerate(tqdm_iter):
-        c, a, c_, a_, u, i, j = batch
-        c, a, c_, a_, u, i, j =  c.cuda(), a.cuda(), c_.cuda(), a_.cuda(), u.cuda(), i.cuda(), j.cuda()
-
-        optimizer.zero_grad()
-
-        # generation loss
-        with autocast():
-
-            ori_output_i = model(c, a, c_, a_, u, i)
-            ori_output_j = model(c, a, c_, a_, u, j)
-            ori_loss = - F.logsigmoid(ori_output_i - ori_output_j).mean()
-
-        if args.fp16:
-            args.scaler.scale(ori_loss).backward()
-        else:
-            ori_loss.backward()
-
-        clip_grad_norm_(model.parameters(), args.grad_clip)
-        optimizer.step()
-        
-        total_loss.append(ori_loss.data.item())
-
-        mean_loss = np.mean(total_loss)
-        tqdm_iter.set_description(f"[Epoch {e}] [loss: {mean_loss:.4f}]")
-
-
-def main(data_path, args, pretrained_weights=None):
-    
-    terminate_cnt = 0
-    assert torch.cuda.is_available()
-
-    print("[!] loading dataset...")
-    train_dataset = Dataset(path=data_path, mode="train", args=args)
-    train_data = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    valid_data = DataLoader(Dataset(path=data_path, mode="valid", args=args), batch_size=args.batch_size, shuffle=True)
-    test_data = DataLoader(Dataset(path=data_path, mode="test", args=args), batch_size=args.batch_size, shuffle=True)
-
-    args.item_size = train_dataset.item_size
-    args.user_size = train_dataset.user_size
-    args.pad = train_dataset.pad_token
-    args.cate_pad = args.cate_pad = train_dataset.cate_pad_token
-    args.attr_pad = args.attr_pad = train_dataset.attr_pad_token
-
-    print("[!] Instantiating models...")
-    model = Model(args).cuda()
-
-    if pretrained_weights is not None:
-        model.load_state_dict(torch.load(pretrained_weights))
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.decay)
-
-    args.scaler = torch.cuda.amp.GradScaler() if args.fp16 else None
-        
-    print(model)
-
-    val_metrics = evaluate(model, valid_data, args)
-    best_prec = val_metrics['ori_f1@10']
-    print("[Epoch 0]" + " | ".join([m + ':' + f'{val_metrics[m]:.4f}'  for m in val_metrics]))
-
-    test_metrics = evaluate(model, test_data, args) 
-    print("[Epoch 0]" + " | ".join([m + ':' + f'{test_metrics[m]:.4f}'  for m in test_metrics]))
-
-    for e in range(1, args.epochs+1):
-        train(e, model, optimizer, train_data, args)
-
-        if e % args.print_every == 0:
-
-            # Val loss
-            val_metrics = evaluate(model, valid_data, args)
-            val_prec = val_metrics['ori_f1@10']
-            print(f"[Epoch {e}]" + " | ".join([m + ':' + f'{val_metrics[m]:.4f}'  for m in val_metrics]))
-
-            # Test loss
-            test_metrics = evaluate(model, test_data, args) 
-            print(f"[Epoch {e}]" + " | ".join([m + ':' + f'{test_metrics[m]:.4f}'  for m in test_metrics]))
-
-            # Save the model if the validation loss is the best we've seen so far.
-            if not best_prec or val_prec > best_prec:
-                print("[!] saving model...")
-                torch.save(model.state_dict(), os.path.join(ckpt_dir, f'model_{e}.pt'))
-                best_prec = val_prec
-
-                with open(os.path.join(ckpt_dir, "test.log"), "w") as f:
-                    test_metrics.update({'epoch': e})
-                    f.write(json.dumps(test_metrics, indent=2))
-                terminate_cnt = 0
-            else:
-                terminate_cnt += 1
-            
-        # early stop
-        if terminate_cnt == TER:
-            break
+        pass
+ 
+# ------------------------
+# Argument 
+# ------------------------
 
 def parse_arguments():
     p = argparse.ArgumentParser(description='Hyperparams')
     # dataset
-    p.add_argument('--data', type=str, default='steam',
-                   help='steam')    
+    p.add_argument('--data', type=str, default='Clothing',
+                   help='dataset name')    
     # training
-    p.add_argument('--epochs', type=int, default=1000,
+    p.add_argument('--epochs', type=int, default=100,
                    help='number of epochs for train')
     p.add_argument('--batch_size', type=int, default=128,
                    help='number of epochs for train')
     p.add_argument('--lr', type=float, default=0.001,
                    help='initial learning rate')
-    p.add_argument('--seed', type=int, default=None,
+    p.add_argument('--seed', type=int, default=42,
                    help='random seed for model training')
-    p.add_argument('--grad_clip', type=float, default=10.0,
-                   help='in case of gradient explosion')
+    p.add_argument('--max_size', type=int, default=64,
+                   help='max length of records')
     # model
-    p.add_argument('--embed_size', type=int, default=32,
+    p.add_argument('--embed_size', type=int, default=16,
                    help='embed size for items')
     # regularization
     p.add_argument('--dropout', type=float, default=0,
@@ -194,12 +109,16 @@ def parse_arguments():
     # logging and output
     p.add_argument('--print_every', type=float, default=10,
                    help="print evaluate results every X epoch")
-    p.add_argument('--ckpt_dir', type=str, default='experiments/test',
+    p.add_argument('--ckpt_dir', type=str, default='',
                    help='checkpoint saving directory')
     # loading
     p.add_argument('--load_pretrained_weights', type=str, default=None,
                    help='checkpoint directory to load')
     return p.parse_args()
+
+# ------------------------
+# Main Function
+# ------------------------
 
 if __name__ == "__main__":
     args = parse_arguments()
@@ -207,16 +126,27 @@ if __name__ == "__main__":
 
     # logging folder
     branch, commit = last_commit_msg()
-    ckpt_dir = os.path.join('checkpoints', branch, commit, args.ckpt_dir, f"seed_{args.seed}_dt.now().strftime('%Y-%m-%d-%H-%M-%S')")
+    args.ckpt_dir = os.path.join('checkpoints', branch, f"{commit}_seed_{args.seed}", args.ckpt_dir, dt.now().strftime("%Y-%m-%d-%H-%M-%S"))
 
-    if not os.path.exists(ckpt_dir):
-        os.makedirs(ckpt_dir)
+    if not os.path.exists(args.ckpt_dir):
+        os.makedirs(args.ckpt_dir)
 
-    with open(os.path.join(ckpt_dir, "args.log"), "w") as f:
+    with open(os.path.join(args.ckpt_dir, "args.log"), "w") as f:
         f.write(json.dumps(vars(args), indent=2)) 
-    save_dependencies(ckpt_dir)
+    save_dependencies(args.ckpt_dir)
 
-    # main
-    print(f"set ckpt as {ckpt_dir}")
-    main(f"data/{args.data}", args, args.load_pretrained_weights)
-    print(f"set ckpt as {ckpt_dir}")
+    # dataset
+    data_path = f"data/{args.data}"
+    print(f"set ckpt as {args.ckpt_dir}, data path as {data_path}")
+    
+    train_dataset = Dataset(path=data_path, mode="train", args=args)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=32)
+    val_loader = DataLoader(Dataset(path=data_path, mode="validation", args=args), batch_size=args.batch_size, shuffle=False, num_workers=32)
+    test_loader = DataLoader(Dataset(path=data_path, mode="test", args=args), batch_size=args.batch_size, shuffle=False, num_workers=32)
+
+    # model and training
+    model = Model(args)
+    early_stop_callback = EarlyStopping(monitor="validation/aspect_acc", patience=10, verbose=False, mode="max")
+    trainer = pl.Trainer(default_root_dir=args.ckpt_dir, gpus=1, callbacks=[early_stop_callback], max_epochs=args.epochs)
+    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+    trainer.test(model=model, dataloaders=test_loader, ckpt_path='best')

@@ -22,6 +22,7 @@ def last_commit_msg():
         return current_branch, f"{msg_short}_{hashed_id}"
     except:
         return "", "no_commit"
+    
 
 def save_dependencies(ckpt):
     try:
