@@ -126,14 +126,10 @@ if __name__ == "__main__":
 
     # logging folder
     branch, commit = last_commit_msg()
-    args.ckpt_dir = os.path.join('checkpoints', branch, f"{commit}_seed_{args.seed}", args.ckpt_dir, dt.now().strftime("%Y-%m-%d-%H-%M-%S"))
+    args.ckpt_dir = os.path.join('checkpoints', branch, commit, args.ckpt_dir, f'seed_{args.seed}_{dt.now().strftime("%Y-%m-%d-%H-%M-%S")}')
 
     if not os.path.exists(args.ckpt_dir):
         os.makedirs(args.ckpt_dir)
-
-    with open(os.path.join(args.ckpt_dir, "args.log"), "w") as f:
-        f.write(json.dumps(vars(args), indent=2)) 
-    save_dependencies(args.ckpt_dir)
 
     # dataset
     data_path = f"data/{args.data}"
@@ -143,6 +139,11 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=32)
     val_loader = DataLoader(Dataset(path=data_path, mode="validation", args=args), batch_size=args.batch_size, shuffle=False, num_workers=32)
     test_loader = DataLoader(Dataset(path=data_path, mode="test", args=args), batch_size=args.batch_size, shuffle=False, num_workers=32)
+
+    # save args
+    with open(os.path.join(args.ckpt_dir, "args.log"), "w") as f:
+        f.write(json.dumps(vars(args), indent=2)) 
+    save_dependencies(args.ckpt_dir)
 
     # model and training
     model = Model(args)
