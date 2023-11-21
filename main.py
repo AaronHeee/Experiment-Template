@@ -1,153 +1,127 @@
-import os 
-import json
-import argparse
-from datetime import datetime as dt
+## Define Dependency
 
-import torch 
-from torch import nn 
+import os
+import json
+
+import torch
+from torch import nn
 from torch.utils.data import DataLoader
 
-from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_score
+import random
+from collections import defaultdict
+from copy import deepcopy
+from jsonargparse import CLI, Namespace
 
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from utils import random_seed, last_commit_msg, save_dependencies
+from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 
-MIN_VAL = 1e-6
+EPS = 1e-6
+K = [1, 5, 10, 50]
 
-# ------------------------
-# Model 
-# ------------------------
+## Define Dataset
 
-class Model(pl.LightningModule):
-
-    # --------------------
-    # Model Definition
-    # --------------------
-
+class Data(object):
     def __init__(self, args):
-        super().__init__()
-        # args
         self.args = args
-
-    def forward(self, batch):
-        pass
-
-    # -------------------
-    # Training Definition
-    # -------------------
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.args.lr, weight_decay=self.args.decay)
-        return optimizer 
-
-    def training_step(self, batch, batch_idx):
-        aspect_label, senti_label = batch['aspect_label'].squeeze(-1), batch['senti_label'].squeeze(-1)
-        aspect_pred, senti_pred = self.forward(batch)
-        # loss calculation
-        aspect_loss = self.aspect_criterion(aspect_pred, aspect_label)
-        senti_loss = self.senti_criterion(senti_pred, senti_label)
-        # logging
-        self.log('train/aspect_loss', aspect_loss.item())
-        self.log('train/senti_loss', senti_loss.item())
-        # multiple loss
-        loss = aspect_loss + senti_loss
-        return loss 
-
-    def validation_step(self, batch, batch_idx):
-        pass
-
-
-    def test_step(self, batch, batch_idx):
-        pass
- 
-# ------------------------
-# Dataset 
-# ------------------------
+        ......
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, path, mode, args):
+    def __init__(self, data, mode, args):
+        self.data = data.split[mode]
         self.args = args
         self.mode = mode
 
     def __len__(self):
-        pass
+        return len(self.data)
 
     def __getitem__(self, index):
-        pass
- 
-# ------------------------
-# Argument 
-# ------------------------
+        ......
+        return {'history': torch.LongTensor(h), 'label': pos, 'negative': neg}
 
-def parse_arguments():
-    p = argparse.ArgumentParser(description='Hyperparams')
-    # dataset
-    p.add_argument('--data', type=str, default='Clothing',
-                   help='dataset name')    
-    # training
-    p.add_argument('--epochs', type=int, default=100,
-                   help='number of epochs for train')
-    p.add_argument('--batch_size', type=int, default=128,
-                   help='number of epochs for train')
-    p.add_argument('--lr', type=float, default=0.001,
-                   help='initial learning rate')
-    p.add_argument('--seed', type=int, default=42,
-                   help='random seed for model training')
-    p.add_argument('--max_size', type=int, default=64,
-                   help='max length of records')
-    # model
-    p.add_argument('--embed_size', type=int, default=16,
-                   help='embed size for items')
-    # regularization
-    p.add_argument('--dropout', type=float, default=0,
-                   help='model dropout')
-    p.add_argument('--decay', type=float, default=0)
-    # fp16
-    p.add_argument('--fp16', action='store_true',
-                   help="Whether to use 16-bit float precision instead of 32-bit")
-    # logging and output
-    p.add_argument('--print_every', type=float, default=10,
-                   help="print evaluate results every X epoch")
-    p.add_argument('--ckpt_dir', type=str, default='',
-                   help='checkpoint saving directory')
-    # loading
-    p.add_argument('--load_pretrained_weights', type=str, default=None,
-                   help='checkpoint directory to load')
-    return p.parse_args()
+## Define Model
 
-# ------------------------
-# Main Function
-# ------------------------
+class Model(pl.LightningModule):
+
+    def __init__(self, args):
+        super().__init__()
+        # save hyperparameters
+        self.save_hyperparameters()
+        # args
+        self.args = args
+        # model
+        self.model = ...
+        # loss defintion
+        self.loss = ......
+
+    def forward(self, h, i):
+        ......
+
+    def configure_optimizers(self):
+        return torch.optim.AdamW(self.parameters(), lr=self.args.lr, weight_decay=self.args.decay)
+
+    def eval_step(self, batch, mode='train'):
+        .....
+        # metric
+        for k in K:
+            self.log(f'{mode}/H@{k}', (rank < k).float().mean().item(), prog_bar=(k==10), on_epoch=True, on_step=False)
+
+    def training_step(self, batch, batch_idx):
+        h, l, n = batch['history'], batch['label'], batch['negative']
+        logits_pos = self.forward(h, l)
+        logits_neg = self.forward(h, n)
+        loss = self.loss(logits_pos, torch.ones_like(logits_pos).to(logits_pos)) \
+              + self.loss(logits_neg, torch.zeros_like(logits_neg).to(logits_neg))
+        self.log(f'train/loss', loss.item())
+
+        if self.current_epoch % self.args.print_every == 0:
+            self.eval_step(batch, 'train')
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        return self.eval_step(batch, 'valid')
+
+    def test_step(self, batch, batch_idx):
+        return self.eval_step(batch, 'test')
+
+## Define Training
+
+def main(data: str = 'ml-1m', data_dir: str = '../data',
+         epochs: int = 200, batch_size: int = 256, lr: float = 0.001, decay: float = 0,
+         max_len: int = 128, embed_size: int = 32, alpha: float = 1,
+         print_every: int = 10, ckpt_dir: str = 'test',
+         load_pretrained_weights: str = None, test_only: bool = False, max_minutes: int = 30):
+
+    # args
+    args = Namespace(**locals())
+    print(args)
+
+    # dataloader
+    data = Data(args=args)
+    train_loader = DataLoader(Dataset(data=data, mode="train", args=args), batch_size=args.batch_size, shuffle=True, num_workers=0)
+    val_loader = DataLoader(Dataset(data=data, mode="valid", args=args), batch_size=args.batch_size, shuffle=False, num_workers=0)
+    test_loader = DataLoader(Dataset(data=data, mode="test", args=args), batch_size=args.batch_size, shuffle=False, num_workers=0)
+
+    # update args
+    args.n_users = data.n_users
+    args.n_items = data.n_items
+    args.pad_token = args.n_items
+
+    # model and trainer
+    model = Model(args)
+    print(model)
+    early_stop_callback = EarlyStopping(monitor="valid/H@10", patience=100, verbose=False, mode="max")
+    checkpoint_callback = ModelCheckpoint(save_top_k=1, monitor="valid/H@10", mode='max')
+    trainer = pl.Trainer(default_root_dir=args.ckpt_dir, accelerator='auto', max_epochs=args.epochs, max_time={'minutes': args.max_minutes}, gradient_clip_val=5.0, callbacks=[early_stop_callback, checkpoint_callback], check_val_every_n_epoch=args.print_every)
+
+    # mode fit or test
+    if args.test_only:
+        model.load_state_dict(torch.load(args.load_pretrained_weights)['state_dict'])
+        trainer.test(model=model, dataloaders=test_loader)
+    else:
+        trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+        trainer.test(model=model, dataloaders=test_loader, ckpt_path='best')
 
 if __name__ == "__main__":
-    args = parse_arguments()
-    args.seed = random_seed(args.seed)
-
-    # logging folder
-    branch, commit = last_commit_msg()
-    args.ckpt_dir = os.path.join('checkpoints', branch, commit, args.ckpt_dir, f'seed_{args.seed}_{dt.now().strftime("%Y-%m-%d-%H-%M-%S")}')
-
-    if not os.path.exists(args.ckpt_dir):
-        os.makedirs(args.ckpt_dir)
-
-    # dataset
-    data_path = f"data/{args.data}"
-    print(f"set ckpt as {args.ckpt_dir}, data path as {data_path}")
-    
-    train_dataset = Dataset(path=data_path, mode="train", args=args)
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=32)
-    val_loader = DataLoader(Dataset(path=data_path, mode="validation", args=args), batch_size=args.batch_size, shuffle=False, num_workers=32)
-    test_loader = DataLoader(Dataset(path=data_path, mode="test", args=args), batch_size=args.batch_size, shuffle=False, num_workers=32)
-
-    # save args
-    with open(os.path.join(args.ckpt_dir, "args.log"), "w") as f:
-        f.write(json.dumps(vars(args), indent=2)) 
-    save_dependencies(args.ckpt_dir)
-
-    # model and training
-    model = Model(args)
-    early_stop_callback = EarlyStopping(monitor="validation/aspect_acc", patience=10, verbose=False, mode="max")
-    trainer = pl.Trainer(default_root_dir=args.ckpt_dir, gpus=1, callbacks=[early_stop_callback], max_epochs=args.epochs)
-    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
-    trainer.test(model=model, dataloaders=test_loader, ckpt_path='best')
+    CLI(main)
